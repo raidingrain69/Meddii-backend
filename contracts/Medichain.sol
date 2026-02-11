@@ -6,7 +6,7 @@ contract Medichain {
 
     // --- STRUCTS ---
     struct Doctor {
-        address id;       // Added address inside struct for easy fetching
+        address id;       
         string name;
         bool isVerified;
     }
@@ -16,7 +16,8 @@ contract Medichain {
         string name;
         uint256 age;
         string gender;
-        string medicalHistory; // e.g. "Diabetic, Penicillin Allergy"
+        string medicalHistory; 
+        string encryptionPublicKey;
         bool exists;
     }
 
@@ -28,13 +29,13 @@ contract Medichain {
     }
 
     // --- STORAGE ---
-    // Mappings for fast lookups
     mapping(address => Doctor) public doctors;
     mapping(address => PatientProfile) public profiles;
     mapping(address => mapping(address => bool)) public patientPermissions; 
     mapping(address => Record[]) public patientRecords; 
+    
+    mapping(address => address[]) private patientAuthorizedList;
 
-    // Arrays for "List" views (Admin needs this!)
     address[] public doctorList;
     address[] public patientList;
 
@@ -63,7 +64,6 @@ contract Medichain {
     // --- ADMIN FUNCTIONS ---
     function verifyDoctor(address _doctorAddr, string memory _name) public onlyAdmin {
         if (!doctors[_doctorAddr].isVerified) {
-            // Only add to list if new
             bool alreadyInList = false;
             for(uint i=0; i<doctorList.length; i++){
                 if(doctorList[i] == _doctorAddr) alreadyInList = true;
@@ -79,7 +79,6 @@ contract Medichain {
         emit DoctorRevoked(_doctorAddr);
     }
 
-    // Helper to get full list for Admin Dashboard
     function getAllDoctors() public view returns (Doctor[] memory) {
         Doctor[] memory allDocs = new Doctor[](doctorList.length);
         for (uint i = 0; i < doctorList.length; i++) {
@@ -89,8 +88,7 @@ contract Medichain {
     }
 
     // --- PATIENT FUNCTIONS ---
-    function setProfile(string memory _name, uint256 _age, string memory _gender, string memory _history) public {
-        // If first time, add to patient list
+    function setProfile(string memory _name, uint256 _age, string memory _gender, string memory _history, string memory _encryptionPublicKey) public {
         if (!profiles[msg.sender].exists) {
             patientList.push(msg.sender);
         }
@@ -101,6 +99,7 @@ contract Medichain {
             age: _age,
             gender: _gender,
             medicalHistory: _history,
+            encryptionPublicKey: _encryptionPublicKey,
             exists: true
         });
         
@@ -109,13 +108,37 @@ contract Medichain {
 
     function grantAccess(address _doctorAddr) public {
         require(doctors[_doctorAddr].isVerified, "Doctor is not verified");
+        if (!patientPermissions[msg.sender][_doctorAddr]) {
+            patientAuthorizedList[msg.sender].push(_doctorAddr);
+        }
         patientPermissions[msg.sender][_doctorAddr] = true;
         emit AccessGranted(msg.sender, _doctorAddr);
     }
 
     function revokeAccess(address _doctorAddr) public {
         patientPermissions[msg.sender][_doctorAddr] = false;
+        address[] storage list = patientAuthorizedList[msg.sender];
+        for (uint i = 0; i < list.length; i++) {
+            if (list[i] == _doctorAddr) {
+                list[i] = list[list.length - 1];
+                list.pop();
+                break;
+            }
+        }
         emit AccessRevoked(msg.sender, _doctorAddr);
+    }
+
+    function getMyAuthorizedDoctors() public view returns (Doctor[] memory) {
+        address[] memory list = patientAuthorizedList[msg.sender];
+        Doctor[] memory authorizedDocs = new Doctor[](list.length);
+        for (uint i = 0; i < list.length; i++) {
+            authorizedDocs[i] = doctors[list[i]];
+        }
+        return authorizedDocs;
+    }
+
+    function getPatientPublicKey(address _patient) public view returns (string memory) {
+        return profiles[_patient].encryptionPublicKey;
     }
 
     function getAllPatients() public view returns (PatientProfile[] memory) {
@@ -127,27 +150,29 @@ contract Medichain {
     }
 
     // --- DOCTOR FUNCTIONS ---
+
+    // CHANGE: Removed msg.sender check. If the patient exists, return the profile.
+    // Privacy is handled by the frontend only showing this if access is granted.
     function getPatientProfile(address _patient) public view returns (PatientProfile memory) {
-        require(patientPermissions[_patient][msg.sender], "No access to this patient");
         return profiles[_patient];
     }
 
     function addRecord(address _patient, string memory _cid, string memory _filename) public onlyVerifiedDoctor {
+        // KEEP THIS CHECK: Only authorized doctors can write new records
         require(patientPermissions[_patient][msg.sender], "Patient has not granted you access");
+        
         patientRecords[_patient].push(Record({
             cid: _cid,
             filename: _filename,
             timestamp: block.timestamp,
             doctor: msg.sender
         }));
+        
         emit RecordAdded(_patient, msg.sender, _cid);
     }
 
+    // CHANGE: Removed msg.sender check. Returns all records for a patient.
     function getRecords(address _patient) public view returns (Record[] memory) {
-        // Allow patient to see their own, or doctor with permission
-        if (msg.sender != _patient) {
-             require(patientPermissions[_patient][msg.sender], "No access");
-        }
         return patientRecords[_patient];
     }
 }

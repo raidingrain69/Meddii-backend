@@ -70,7 +70,8 @@ async function main() {
     address: contractAddress,
     abi: artifact.abi,
     functionName: 'setProfile',
-    args: ["John Doe", 30n, "Male", "Asthma, Nut Allergy"], // Note: 30n for BigInt
+    // Added the 5th argument: a dummy public key to match the new ABI
+    args: ["John Doe", 30n, "Male", "Asthma, Nut Allergy", "04719af3501535928d2238499645366c82d9212002f23d047321e25e83e601556011559987820123"], 
     account: patientAccount
   });
   await publicClient.waitForTransactionReceipt({ hash: profileTx });
